@@ -115,7 +115,7 @@ if (isset($_GET['ajax'])) {
             if (do_call('GET', '/api')) {
                 echo json_encode(['success' => true, 'data' => $response]);
             } else {
-                echo json_encode(['success' => false, 'error' => $error]);
+                echo json_encode(['success' => false, 'error' => $error, 'url' => $device_url . '/api']);
             }
             break;
             
@@ -123,7 +123,7 @@ if (isset($_GET['ajax'])) {
             if (do_call('GET', '/api/v1/data')) {
                 echo json_encode(['success' => true, 'data' => $response]);
             } else {
-                echo json_encode(['success' => false, 'error' => $error]);
+                echo json_encode(['success' => false, 'error' => $error, 'url' => $device_url . '/api/v1/data']);
             }
             break;
             
@@ -131,7 +131,7 @@ if (isset($_GET['ajax'])) {
             if (do_call('GET', '/api/v1/state')) {
                 echo json_encode(['success' => true, 'data' => $response]);
             } else {
-                echo json_encode(['success' => false, 'error' => $error]);
+                echo json_encode(['success' => false, 'error' => $error, 'url' => $device_url . '/api/v1/state']);
             }
             break;
             
@@ -147,14 +147,34 @@ if ($action) {
         case 'toggle_power':
             $power_on = ($_POST['power_on'] ?? '0') === '1';
             $payload = ['power_on' => $power_on];
-            do_call('PUT', '/api/v1/state', json_encode($payload));
+            if (do_call('PUT', '/api/v1/state', json_encode($payload))) {
+                $response_msg = 'Power ' . ($power_on ? 'ON' : 'OFF') . ' command sent successfully';
+            } else {
+                $error_msg = 'Failed to send power command: ' . json_encode($error);
+            }
             break;
             
         case 'set_brightness':
             $brightness = (int)($_POST['brightness'] ?? 0);
             if ($brightness >= 0 && $brightness <= 255) {
                 $payload = ['brightness' => $brightness];
-                do_call('PUT', '/api/v1/state', json_encode($payload));
+                if (do_call('PUT', '/api/v1/state', json_encode($payload))) {
+                    $response_msg = 'Brightness set to ' . $brightness;
+                } else {
+                    $error_msg = 'Failed to set brightness: ' . json_encode($error);
+                }
+            } else {
+                $error_msg = 'Invalid brightness value. Must be 0-255.';
+            }
+            break;
+            
+        case 'toggle_lock':
+            $switch_lock = ($_POST['switch_lock'] ?? '0') === '1';
+            $payload = ['switch_lock' => $switch_lock];
+            if (do_call('PUT', '/api/v1/state', json_encode($payload))) {
+                $response_msg = 'Switch lock ' . ($switch_lock ? 'ENABLED' : 'DISABLED') . ' successfully';
+            } else {
+                $error_msg = 'Failed to change switch lock: ' . json_encode($error);
             }
             break;
     }
@@ -219,6 +239,18 @@ button.danger:hover{background:#c82333;}
   <span id="statusText">Checking connection...</span>
 </div>
 
+<?php if (isset($error_msg)): ?>
+<div class="status" style="background:#f8d7da; color:#721c24; border:1px solid #f5c6cb;">
+  <strong>Error:</strong> <?= htmlspecialchars($error_msg) ?>
+</div>
+<?php endif; ?>
+
+<?php if (isset($response_msg)): ?>
+<div class="status" style="background:#d4edda; color:#155724; border:1px solid #c3e6cb;">
+  <strong>Success:</strong> <?= htmlspecialchars($response_msg) ?>
+</div>
+<?php endif; ?>
+
 <!-- Live Measurements -->
 <div class="card">
   <h2>Live Measurements</h2>
@@ -272,6 +304,19 @@ button.danger:hover{background:#c82333;}
           Value: <span id="brightnessValue">0</span> / 255
         </div>
         <button type="button" onclick="setBrightness()" class="primary" style="margin-top:8px;">Set Brightness</button>
+      </div>
+    </div>
+    <div>
+      <label>Switch Lock</label>
+      <div style="display:flex; gap:12px; margin-top:8px;">
+        <button type="button" onclick="toggleLock(true)" class="primary" id="btnLockEnable">Enable Lock</button>
+        <button type="button" onclick="toggleLock(false)" class="danger" id="btnLockDisable">Disable Lock</button>
+      </div>
+      <div style="margin-top:12px;">
+        <strong>Lock Status: <span id="lockStatus">Unknown</span></strong>
+      </div>
+      <div style="margin-top:8px; font-size:14px; color:#6c757d;">
+        When enabled, prevents accidental power changes via physical button
       </div>
     </div>
   </div>
@@ -332,12 +377,20 @@ function updateDeviceInfo() {
             } else {
                 statusEl.className = 'status offline';
                 statusTextEl.textContent = 'Connection failed';
-                deviceInfoEl.innerHTML = '<div style="color: #dc3545;">Unable to connect to device</div>';
+                let errorHtml = '<div style="color: #dc3545;">Unable to connect to device</div>';
+                if (data.error) {
+                    errorHtml += '<div style="font-size: 12px; margin-top: 8px; color: #6c757d;">Error: ' + JSON.stringify(data.error) + '</div>';
+                }
+                if (data.url) {
+                    errorHtml += '<div style="font-size: 12px; margin-top: 4px; color: #6c757d;">URL: ' + data.url + '</div>';
+                }
+                deviceInfoEl.innerHTML = errorHtml;
             }
         })
         .catch(error => {
             document.getElementById('connectionStatus').className = 'status offline';
             document.getElementById('statusText').textContent = 'Connection error';
+            console.error('Device info fetch error:', error);
         });
 }
 
@@ -353,9 +406,23 @@ function updateMeasurements() {
                 document.getElementById('current').textContent = d.current_a !== undefined ? d.current_a.toFixed(3) : '--';
                 document.getElementById('frequency').textContent = d.frequency_hz !== undefined ? d.frequency_hz.toFixed(2) : '--';
                 document.getElementById('energyTotal').textContent = d.total_energy_import_kwh !== undefined ? d.total_energy_import_kwh.toFixed(3) : '--';
+            } else {
+                // Set error indicators
+                ['powerActive', 'powerReactive', 'voltage', 'current', 'frequency', 'energyTotal'].forEach(id => {
+                    document.getElementById(id).textContent = 'ERR';
+                });
+                if (data.error) {
+                    console.log('Measurement error:', data.error, 'URL:', data.url);
+                }
             }
         })
-        .catch(error => console.log('Measurement update failed:', error));
+        .catch(error => {
+            console.log('Measurement update failed:', error);
+            // Set network error indicators
+            ['powerActive', 'powerReactive', 'voltage', 'current', 'frequency', 'energyTotal'].forEach(id => {
+                document.getElementById(id).textContent = 'NET';
+            });
+        });
 }
 
 function updateSocketState() {
@@ -371,16 +438,57 @@ function updateSocketState() {
                 if (d.power_on !== undefined) {
                     powerStatus.textContent = d.power_on ? 'ON' : 'OFF';
                     powerStatus.style.color = d.power_on ? '#28a745' : '#dc3545';
+                } else {
+                    powerStatus.textContent = 'Unknown';
+                    powerStatus.style.color = '#6c757d';
                 }
                 
-                // Update brightness slider
+                // Update brightness slider (only if supported)
+                const brightnessControl = document.querySelector('.controls > div:nth-child(2)');
                 if (d.brightness !== undefined) {
+                    brightnessControl.style.display = 'block';
                     document.getElementById('brightnessSlider').value = d.brightness;
                     document.getElementById('brightnessValue').textContent = d.brightness;
+                } else {
+                    // Hide brightness control if not supported
+                    brightnessControl.style.display = 'none';
+                    console.log('Brightness control not supported by this device');
+                }
+                
+                // Update lock status
+                const lockStatus = document.getElementById('lockStatus');
+                if (d.switch_lock !== undefined) {
+                    lockStatus.textContent = d.switch_lock ? 'ENABLED' : 'DISABLED';
+                    lockStatus.style.color = d.switch_lock ? '#dc3545' : '#28a745';
+                } else {
+                    lockStatus.textContent = 'Not Supported';
+                    lockStatus.style.color = '#6c757d';
+                }
+            } else {
+                // Handle error case
+                const powerStatus = document.getElementById('powerStatus');
+                powerStatus.textContent = 'Error';
+                powerStatus.style.color = '#dc3545';
+                
+                const lockStatus = document.getElementById('lockStatus');
+                lockStatus.textContent = 'Error';
+                lockStatus.style.color = '#dc3545';
+                
+                if (data.error) {
+                    console.log('State error:', data.error, 'URL:', data.url);
                 }
             }
         })
-        .catch(error => console.log('State update failed:', error));
+        .catch(error => {
+            console.log('State update failed:', error);
+            const powerStatus = document.getElementById('powerStatus');
+            powerStatus.textContent = 'Network Error';
+            powerStatus.style.color = '#dc3545';
+            
+            const lockStatus = document.getElementById('lockStatus');
+            lockStatus.textContent = 'Network Error';
+            lockStatus.style.color = '#dc3545';
+        });
 }
 
 function togglePower(turnOn) {
@@ -414,6 +522,20 @@ function setBrightness() {
 
 function updateBrightnessDisplay(value) {
     document.getElementById('brightnessValue').textContent = value;
+}
+
+function toggleLock(enableLock) {
+    const formData = new FormData();
+    formData.append('action', 'toggle_lock');
+    formData.append('switch_lock', enableLock ? '1' : '0');
+    
+    fetch('', {
+        method: 'POST',
+        body: formData
+    }).then(() => {
+        // Force immediate state update
+        setTimeout(updateSocketState, 100);
+    });
 }
 </script>
 
