@@ -42,6 +42,31 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           
+          # Create production .env file from GitHub environment variables
+          cat > .env << 'ENVEOF'
+          # Server Configuration
+          PORT=${{ vars.PORT || '3000' }}
+          NODE_ENV=production
+          
+          # Database Configuration
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_PORT=${{ secrets.DB_PORT || '3306' }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          
+          # HomeWizard Device Configuration  
+          DEVICE_URL=${{ vars.DEVICE_URL }}
+          DEVICE_TIMEOUT=${{ vars.DEVICE_TIMEOUT || '10000' }}
+          
+          # Data Collection Configuration
+          COLLECTION_INTERVAL=${{ vars.COLLECTION_INTERVAL || '60000' }}
+          STATS_RETENTION_DAYS=${{ vars.STATS_RETENTION_DAYS || '90' }}
+          
+          # Logging
+          LOG_LEVEL=${{ vars.LOG_LEVEL || 'info' }}
+          ENVEOF
+          
           # Stop existing containers
           docker compose down || true
           

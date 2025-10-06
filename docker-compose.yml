@@ -1,23 +1,41 @@
-# Docker Compose file for Pilo Plug - HomeWizard Energy Socket Controller
+# Docker Compose file for Pilo Plug - HomeWizard Energy Socket Controller (Node.js)
 # Use: docker compose up -d (modern syntax)
-# Legacy: docker-compose up -d (deprecated)
-version: '3.8'
 
 services:
   pilo-plug:
     build: .
     container_name: pilo-plug-web
     ports:
-      - "8080:80"
+      - "8080:3000"
+    env_file:
+      - .env
     volumes:
-      # Mount the PHP file for development (optional - remove for production)
-      - ./index.php:/var/www/html/index.php:ro
+      # Mount .env file for configuration
+      - ./.env:/usr/src/app/.env:ro
     networks:
       - pilo-network
     restart: unless-stopped
-    environment:
-      - APACHE_RUN_USER=www-data
-      - APACHE_RUN_GROUP=www-data
+    depends_on:
+      - database-init
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Database initialization service
+  database-init:
+    build: .
+    container_name: pilo-plug-db-init
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/usr/src/app/.env:ro
+    networks:
+      - pilo-network
+    command: ["npm", "run", "init-db"]
+    restart: "no"
 
 networks:
   pilo-network:

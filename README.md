@@ -1,190 +1,228 @@
-# HomeWizard Energy - Pilo Plug PHP Interface
+# HomeWizard Energy - Pilo Plug Node.js Controller
 
-A single-file PHP interface for HomeWizard Energy devices, providing a web UI to interact with both v1 and v2 APIs.
+A modern Node.js application for controlling HomeWizard Energy devices with power usage statistics collection and MariaDB storage.
 
 ## Features
 
-- Single PHP file interface for HomeWizard Energy devices
-- Support for both API v1 (no auth) and v2 (Bearer token)
-- Web-based UI for device interaction
-- Real-time measurements and device control
-- User and token management for v2 API
-- Automated deployment with GitHub Actions
+### Device Control
+- ✅ Turn socket on/off remotely
+- ✅ Adjust brightness (if supported by device)
+- ✅ Control switch lock functionality
+- ✅ Real-time device status monitoring
 
-## Local Development
+### Live Monitoring
+- ✅ Live power measurements (1-second refresh)
+- ✅ Voltage, current, frequency monitoring
+- ✅ Total energy consumption tracking
+- ✅ Device state information
 
-This project includes Docker Compose configuration for easy local development.
+### Statistics & Analytics
+- ✅ Automatic data collection every minute
+- ✅ Historical power usage statistics
+- ✅ Hourly/daily aggregated data for efficient querying
+- ✅ Configurable data retention policy
+- ✅ Power usage trends and analysis
+
+### Modern Web Interface
+- ✅ Responsive design with tabbed interface
+- ✅ Real-time updates without page refresh
+- ✅ Statistics visualization
+- ✅ Device settings management
+- ✅ System health monitoring
+
+## Quick Start
 
 ### Prerequisites
+- Docker & Docker Compose
+- MariaDB database (external)
+- HomeWizard Energy Socket device
 
-- Docker
-- Docker Compose (or Docker with compose plugin)
+### Installation
 
-### Quick Start
-
-1. **Clone the project**
+1. **Clone and setup:**
    ```bash
    git clone <your-repo> pilo-plug
    cd pilo-plug
    ```
 
-2. **Start the application**
+2. **Configure environment:**
+   Copy the example configuration and update with your settings:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your device URL and other settings if needed
+   ```
+   
+   The default configuration includes:
+   ```bash
+   # Database settings (configured for krakatau.treudler.net)
+   DB_HOST=krakatau.treudler.net
+   DB_USER=pilo_plug_stats
+   DB_PASSWORD=Gee4if0quaeThaing2ac7PaChahG9n
+   DB_NAME=pilo_plug_stats
+   
+   # Device settings  
+   DEVICE_URL=http://172.16.0.189
+   ```
+
+3. **Start the application:**
    ```bash
    docker compose up -d
    ```
 
-3. **Access the web interface**
-   Open your browser and navigate to: `http://localhost:8080`
+4. **Access the interface:**
+   Open `http://localhost:8080` in your browser
 
-4. **Configure your device**
-   - Set your HomeWizard device IP address (default: `172.16.0.189`)
-   - Choose API version (v1 or v2)
-   - For v2, create a user token through the web interface
+The database initialization will run automatically on first startup.
 
-### Docker Commands
+## Database Schema
+
+The application creates two main tables:
+
+### power_usage_stats
+Raw measurement data collected every minute:
+- Timestamp, device ID
+- Active power (watts) - **primary metric collected**
+- Voltage, current, frequency  
+- Energy consumption
+- Device state (power, brightness, lock)
+
+### device_info  
+Device metadata and information:
+- Product name, serial number
+- Firmware version, API version
+- Last seen timestamp
+
+## API Endpoints
+
+### Device Control
+- `GET /api/device/info` - Device information
+- `GET /api/device/data` - Current measurements
+- `GET /api/device/state` - Device state
+- `PUT /api/device/state` - Update device state
+- `POST /api/device/power` - Control power
+- `POST /api/device/brightness` - Set brightness
+- `POST /api/device/lock` - Control switch lock
+
+### Statistics
+- `GET /api/stats/recent` - Recent measurements
+- `GET /api/stats/hourly` - Hourly aggregates
+- `GET /api/stats/daily` - Daily summaries
+- `GET /api/stats/summary` - Period summaries
+
+### System
+- `GET /health` - System health check
+- `GET /api/system/collection/stats` - Data collection statistics
+- `POST /api/system/collection/trigger` - Manual data collection
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 3000 | Server port |
+| `DB_HOST` | - | MariaDB host |
+| `DB_USER` | - | Database username |
+| `DB_PASSWORD` | - | Database password |
+| `DB_NAME` | - | Database name |
+| `DEVICE_URL` | http://172.16.0.189 | HomeWizard device URL |
+| `COLLECTION_INTERVAL` | 60000 | Data collection interval (ms) |
+| `STATS_RETENTION_DAYS` | 90 | Raw data retention period |
+
+### Data Collection
+
+The system automatically:
+- Collects measurements every minute (configurable)
+- Stores **only power measurements (watts)** as requested
+- Cleans up old data daily (runs at 2:30 AM)
+- Tracks device state and basic electrical parameters
+
+## Development
+
+### Local Development
 
 ```bash
-# Start the application in background
+# Start with Docker Compose
 docker compose up -d
 
 # View logs
-docker compose logs -f
+docker compose logs -f pilo-plug
 
-# Stop the application
+# Restart application
+docker compose restart pilo-plug
+
+# Stop everything
 docker compose down
-
-# Rebuild and restart
-docker compose up -d --build
-
-# Stop and remove everything (including volumes)
-docker compose down -v
 ```
 
-### Local Configuration
+### Manual Database Initialization
 
-The Docker setup includes:
+```bash
+# Initialize database schema
+docker compose exec pilo-plug npm run init-db
+```
 
-- **Web Server**: Apache with PHP 8.2
-- **Port**: The application is accessible on port 8080
-- **Volume Mount**: The `index.php` file is mounted for development (hot-reload)
-- **Network**: Isolated Docker network for the application
+### Project Structure
+```
+├── server.js              # Main application server
+├── src/
+│   ├── config.js          # Configuration management
+│   ├── homewizard-api.js  # HomeWizard API client
+│   ├── database.js        # Database operations
+│   └── data-collection.js # Background data collection
+├── routes/
+│   ├── device.js          # Device control routes
+│   ├── stats.js           # Statistics routes
+│   └── system.js          # System management routes
+├── public/
+│   └── index.html         # Web interface
+├── scripts/
+│   └── init-database.js   # Database initialization
+└── package.json
+```
 
-### Network Access
+## Architecture
 
-The containerized application needs network access to reach your HomeWizard devices on your local network. The Docker configuration uses bridge networking which should allow access to devices on your LAN.
+This Node.js application provides:
+- Maintaining full API compatibility for device control
+- Adding automatic data collection and storage
+- Providing historical statistics and analytics
+- Improving error handling and system monitoring
+- Using modern async/await patterns
+- Implementing RESTful API design
 
-If you have connectivity issues:
-- Ensure your HomeWizard device is on the same network
-- Check if your Docker installation allows bridge network access to LAN
-- You may need to use host networking: `docker compose up -d --network host`
-
-### Development
-
-For development, the `docker-compose.yml` includes a volume mount that allows you to edit `index.php` without rebuilding the container. Changes will be reflected immediately.
-
-To disable the development volume mount for production:
-1. Remove or comment out the volumes section in `docker-compose.yml`
-2. Rebuild: `docker compose up -d --build`
+### Key Features
+- **Database**: Stores power usage statistics in MariaDB
+- **Data Collection**: Automatic background job every minute  
+- **Statistics**: Built-in analytics and trend analysis
+- **Architecture**: Modern Node.js with Express.js framework
+- **Monitoring**: Health checks and system status endpoints
 
 ## Automated Deployment
 
-This repository uses GitHub Actions to automatically deploy to your server using Docker Compose.
+The GitHub Actions workflow automatically deploys to your server:
 
-### GitHub Configuration
+1. Triggers on push to `main` branch
+2. Connects via SSH to your server
+3. Pulls latest code and rebuilds containers
+4. Initializes database schema if needed
+5. Verifies deployment success
 
-#### Required Secrets
-Go to your repository → Settings → Secrets and variables → Actions → Repository secrets
-
-Add the following secret:
-
-- **`SSH_PRIVATE_KEY`** - The private SSH key that corresponds to the public key on your server
-  - Generate with: `ssh-keygen -t ed25519 -C "github-actions@pilo-plug"`
-  - Copy the private key content (including `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----`)
-  - Add the public key to `~/.ssh/authorized_keys` on your server
-
-#### Required Variables  
-Go to your repository → Settings → Secrets and variables → Actions → Variables
-
-Add the following variables:
-
-- **`SSH_HOST`** - Your server hostname (e.g., `pilo-plug.treudler.net`)
-- **`SSH_PORT`** - SSH port (e.g., `22`)
-- **`SSH_USER`** - SSH username (e.g., `root`)
-- **`SSH_DIR`** - Absolute path where the project is deployed on the server (e.g., `/opt/pilo-plug`)
-
-### Server Setup
-
-#### Prerequisites
-
-1. **Docker and Docker Compose** must be installed on the server
-2. **Git** must be installed on the server  
-3. **SSH access** configured with key-based authentication
-
-#### Initial Server Setup
-
-Connect to your server and run:
-
-```bash
-# Install Docker (if not already installed)
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Ensure Docker Compose plugin is available
-# (Usually included with modern Docker installations)
-docker compose version
-
-# Set up SSH key authentication
-mkdir -p ~/.ssh
-# Add your GitHub Actions public key to ~/.ssh/authorized_keys
-echo "your-public-key-here" >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-**Note:** The GitHub Actions workflow will automatically create the project directory and clone the repository on first deployment. You just need to ensure Docker, Git, and SSH access are configured.
-
-### How Deployment Works
-
-The GitHub Actions workflow triggers on:
-- Push to `main` or `master` branch
-- Manual workflow dispatch
-
-The deployment process:
-1. Connects to your server via SSH
-2. Creates the project directory if it doesn't exist
-3. Initializes Git repository if needed and pulls the latest code
-4. Stops existing Docker containers (if any)
-5. Builds and starts new containers with `docker compose up -d --build`
-6. Cleans up unused Docker images
-7. Verifies the deployment was successful
-
-### Manual Deployment
-
-To deploy manually from your local machine:
-
-```bash
-ssh -p 5674 root@pilo-plug.treudler.net
-cd /opt/pilo-plug  # or your project path
-git pull origin main
-docker compose down
-docker compose up -d --build
-```
+See the original README sections for SSH configuration details.
 
 ## Troubleshooting
 
-### Local Development Issues
-- **Port already in use**: Change the port mapping in `docker-compose.yml` from `8080:80` to another port like `8081:80`
-- **Cannot reach device**: Verify your HomeWizard device IP and ensure it's accessible from your Docker host
-- **SSL/TLS issues**: For v2 API, you may need to enable "Disable SSL verification" in the web interface for local testing
+### Common Issues
+- **Database connection**: Verify MariaDB credentials and network access
+- **Device not found**: Check HomeWizard device IP and network connectivity
+- **Data collection failing**: Review logs with `docker compose logs pilo-plug`
+- **Port conflicts**: Change port mapping in `docker-compose.yml`
 
-### Deployment Issues
-If the deployment fails:
-1. Check the GitHub Actions logs for error messages
-2. Verify all secrets and variables are set correctly
-3. Ensure SSH access works manually: `ssh -p [PORT] [USER]@[HOST]`
-4. Check that Docker and Docker Compose are installed on the server
-5. Verify the project path exists and has the correct permissions
-6. Check server logs: `docker compose logs` on the server
+### Monitoring
+- Access `/health` endpoint for system status
+- Check "System" tab in web interface for detailed monitoring
+- Use `docker compose logs -f` to monitor real-time activity
 
 ## License
 
-This is a single-file PHP interface for HomeWizard Energy devices. Use according to your needs.
+MIT License - Open source HomeWizard Energy device controller with power monitoring.

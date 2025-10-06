@@ -1,25 +1,31 @@
-FROM php:8.2-apache
+FROM node:18-alpine
 
-# Install system dependencies required for PHP extensions
-RUN apt-get update && apt-get install -y \
-    libcurl4-openssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Create app directory
+WORKDIR /usr/src/app
 
-# Enable necessary PHP extensions
-RUN docker-php-ext-install curl
+# Install app dependencies
+# A wildcard is used to ensure both package.json AND package-lock.json are copied
+COPY package*.json ./
 
-# Enable Apache mod_rewrite (useful for single-file apps)
-RUN a2enmod rewrite
+RUN npm install --omit=dev
 
-# Copy the application files
-COPY index.php /var/www/html/
+# Bundle app source
+COPY . .
 
-# Set proper permissions
-RUN chown -R www-data:www-data /var/www/html
-RUN chmod 644 /var/www/html/index.php
+# Create a non-root user to run the app
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nodejs -u 1001
 
-# Expose port 80
-EXPOSE 80
+# Set ownership of the app directory
+RUN chown -R nodejs:nodejs /usr/src/app
+USER nodejs
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Expose port 3000
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node healthcheck.js
+
+# Start the application
+CMD ["npm", "start"]

@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HomeWizard Plug Control</title>
+  <style>
+*{box-sizing:border-box;}
+body{font-family:system-ui,sans-serif;margin:0;padding:20px;background:#f5f5f5;}
+.container{max-width:600px;margin:0 auto;}
+.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+h1{margin:0 0 20px 0;text-align:center;color:#333;}
+.status{padding:16px;border-radius:8px;margin-bottom:20px;text-align:center;font-weight:600;}
+.status.on{background:#d4edda;color:#155724;}
+.status.off{background:#f8d7da;color:#721c24;}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}
+button{padding:16px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.2s;}
+.btn-on{background:#28a745;color:white;}
+.btn-on:hover{background:#218838;}
+.btn-off{background:#dc3545;color:white;}
+.btn-off:hover{background:#c82333;}
+.btn-lock{background:#ffc107;color:#333;}
+.btn-lock:hover{background:#e0a800;}
+.btn-unlock{background:#6c757d;color:white;}
+.btn-unlock:hover{background:#5a6268;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:16px;}
+.stat{text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;}
+.stat-value{font-size:28px;font-weight:bold;color:#007bff;}
+.stat-label{font-size:12px;color:#6c757d;margin-top:4px;}
+.lock-status{text-align:center;margin-top:12px;font-size:14px;}
+.device-url{font-size:12px;color:#6c757d;text-align:center;margin-top:20px;}
+.chart-container{height:200px;background:#f8f9fa;border-radius:8px;padding:16px;position:relative;overflow:hidden;}
+.chart-bars{display:flex;align-items:end;height:150px;gap:2px;}
+.chart-bar{background:#007bff;width:8px;min-height:2px;border-radius:2px 2px 0 0;transition:height 0.3s ease;}
+.chart-info{font-size:12px;color:#6c757d;margin-top:8px;text-align:center;}
+.chart-scale{position:absolute;right:0;top:16px;height:150px;display:flex;flex-direction:column;justify-content:space-between;font-size:10px;color:#999;}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🔌 Pilo Plug</h1>
+
+<!-- Status -->
+<div id="status" class="status off">
+  <span id="statusText">Connecting...</span>
+</div>
+
+<!-- Power Controls -->
+<div class="card">
+  <div class="controls">
+    <button id="btnOn" class="btn-on">⚡ TURN ON</button>
+    <button id="btnOff" class="btn-off">⏹ TURN OFF</button>
+  </div>
+  <div class="controls">
+    <button id="btnLock" class="btn-lock">🔒 LOCK</button>
+    <button id="btnUnlock" class="btn-unlock">🔓 UNLOCK</button>
+  </div>
+  <div id="lockStatus" class="lock-status">Lock: Unknown</div>
+</div>
+
+<!-- Usage Stats -->
+<div class="card">
+  <div class="stats">
+    <div class="stat">
+      <div id="power" class="stat-value">--</div>
+      <div class="stat-label">Power (W)</div>
+    </div>
+    <div class="stat">
+      <div id="energy" class="stat-value">--</div>
+      <div class="stat-label">Energy (kWh)</div>
+    </div>
+    <div class="stat">
+      <div id="voltage" class="stat-value">--</div>
+      <div class="stat-label">Voltage (V)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Usage Graph -->
+<div class="card">
+  <h3 style="margin:0 0 16px 0;color:#333;">Power Usage</h3>
+  <div class="chart-container">
+    <div class="chart-scale" id="chartScale">
+      <span>100W</span>
+      <span>75W</span>
+      <span>50W</span>
+      <span>25W</span>
+      <span>0W</span>
+    </div>
+    <div class="chart-bars" id="chartBars">
+      <!-- Bars will be added here dynamically -->
+    </div>
+    <div class="chart-info" id="chartInfo">Loading chart data...</div>
+  </div>
+</div>
+
+<div class="device-url" id="deviceUrl">Device: Loading...</div>
+
+</div>
+
+<script>
+let currentState = { power: false, locked: false };
+let chartData = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+  initChart();
+  console.log('DOM loaded, setting up event listeners...');
+  
+  // Add event listeners
+  const btnOn = document.getElementById('btnOn');
+  const btnOff = document.getElementById('btnOff');
+  const btnLock = document.getElementById('btnLock');
+  const btnUnlock = document.getElementById('btnUnlock');
+  
+  if (btnOn) {
+    btnOn.addEventListener('click', () => {
+      console.log('ON button clicked');
+      setPower(true);
+    });
+  }
+  
+  if (btnOff) {
+    btnOff.addEventListener('click', () => {
+      console.log('OFF button clicked');
+      setPower(false);
+    });
+  }
+  
+  if (btnLock) {
+    btnLock.addEventListener('click', () => {
+      console.log('LOCK button clicked');
+      toggleLock();
+    });
+  }
+  
+  if (btnUnlock) {
+    btnUnlock.addEventListener('click', () => {
+      console.log('UNLOCK button clicked');
+      toggleLock();
+    });
+  }
+  
+  updateStatus();
+  setInterval(updateStatus, 2000);
+});
+
+function initChart() {
+  // Load historical data from database
+  loadHistoricalData();
+}
+
+async function loadHistoricalData() {
+  try {
+    console.log('Loading historical chart data...');
+    
+    // Fetch last 30 minutes of data (enough for chart)
+    const response = await fetch('/api/stats/recent?hours=0.5');
+    const data = await response.json();
+    
+    if (data.success && data.data && data.data.length > 0) {
+      console.log('Loaded', data.data.length, 'historical data points');
+      
+      // Clear existing data
+      chartData = [];
+      
+      // Convert database records to chart data
+      data.data.forEach(record => {
+        const timestamp = new Date(record.timestamp);
+        const timeStr = timestamp.toLocaleTimeString('en-US', { 
+          hour12: false, 
+          hour: '2-digit', 
+          minute: '2-digit', 
+          second: '2-digit' 
+        });
+        
+        chartData.push({
+          time: timeStr,
+          power: record.active_power_w || 0
+        });
+      });
+      
+      // Keep only last 30 points for display
+      if (chartData.length > 30) {
+        chartData = chartData.slice(-30);
+      }
+      
+      console.log('Chart initialized with', chartData.length, 'points');
+      updateChart();
+    } else {
+      console.log('No historical data available, starting fresh');
+    }
+  } catch (error) {
+    console.error('Failed to load historical data:', error);
+    console.log('Starting with empty chart');
+  }
+}
+
+async function updateStatus() {
+  try {
+    // Get device info and state
+    const [infoRes, dataRes, stateRes] = await Promise.all([
+      fetch('/api/device/info'),
+      fetch('/api/device/data'), 
+      fetch('/api/device/state')
+    ]);
+    
+    const info = await infoRes.json();
+    const data = await dataRes.json();
+    const state = await stateRes.json();
+    
+    // Update connection status
+    const statusEl = document.getElementById('status');
+    const statusText = document.getElementById('statusText');
+    
+    if (info.success && state.success) {
+      statusEl.className = state.data.power_on ? 'status on' : 'status off';
+      statusText.textContent = state.data.power_on ? '⚡ PLUG IS ON' : '⏹ PLUG IS OFF';
+      currentState.power = state.data.power_on;
+      
+      // Update lock status  
+      if (state.data.switch_lock !== undefined) {
+        currentState.locked = state.data.switch_lock;
+        updateLockButtons();
+      }
+      
+      // Update device URL
+      document.getElementById('deviceUrl').textContent = `Device: ${info.data.product_name || 'HomeWizard Plug'}`;
+    } else {
+      statusEl.className = 'status off';
+      statusText.textContent = '❌ CONNECTION FAILED';
+    }
+    
+    // Update usage stats
+    if (data.success && data.data) {
+      const d = data.data;
+      document.getElementById('power').textContent = d.active_power_w ? d.active_power_w.toFixed(1) : '--';
+      document.getElementById('energy').textContent = d.total_energy_import_kwh ? d.total_energy_import_kwh.toFixed(3) : '--';
+      document.getElementById('voltage').textContent = d.voltage_v ? d.voltage_v.toFixed(0) : '--';
+      
+      // Add data point to chart every time we get data
+      if (d.active_power_w !== undefined) {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        
+        // Only add if it's a new data point (avoid duplicates)
+        if (chartData.length === 0 || chartData[chartData.length - 1].time !== timeStr) {
+          chartData.push({
+            time: timeStr,
+            power: d.active_power_w
+          });
+          
+          console.log('Added chart data point:', timeStr, d.active_power_w + 'W');
+          
+          // Keep only last 30 data points (1 minute at 2-second intervals)
+          if (chartData.length > 30) {
+            chartData.shift();
+          }
+          
+          // Update chart immediately
+          updateChart();
+        }
+      }
+    }
+    
+  } catch (error) {
+    document.getElementById('status').className = 'status off';
+    document.getElementById('statusText').textContent = '❌ ERROR';
+  }
+}
+
+function updateLockButtons() {
+  const lockBtn = document.getElementById('btnLock');
+  const unlockBtn = document.getElementById('btnUnlock');
+  const lockStatus = document.getElementById('lockStatus');
+  
+  if (currentState.locked) {
+    lockBtn.style.display = 'none';
+    unlockBtn.style.display = 'block';
+    lockStatus.textContent = '🔒 LOCKED';
+  } else {
+    lockBtn.style.display = 'block'; 
+    unlockBtn.style.display = 'none';
+    lockStatus.textContent = '🔓 UNLOCKED';
+  }
+}
+
+async function setPower(on) {
+  console.log('setPower called with:', on);
+  try {
+    const response = await fetch('/api/device/power', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ power_on: on })
+    });
+    
+    console.log('Power API response:', response.status);
+    
+    if (response.ok) {
+      setTimeout(updateStatus, 200);
+    } else {
+      console.error('Power API failed with status:', response.status);
+    }
+  } catch (error) {
+    console.error('Power control failed:', error);
+  }
+}
+
+async function toggleLock() {
+  console.log('toggleLock called, current state:', currentState.locked);
+  try {
+    const response = await fetch('/api/device/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ switch_lock: !currentState.locked })
+    });
+    
+    console.log('Lock API response:', response.status);
+    
+    if (response.ok) {
+      setTimeout(updateStatus, 200);
+    } else {
+      console.error('Lock API failed with status:', response.status);
+    }
+  } catch (error) {
+    console.error('Lock control failed:', error);
+  }
+}
+
+function updateChart() {
+  console.log('updateChart called, data points:', chartData.length);
+  
+  const barsContainer = document.getElementById('chartBars');
+  const infoEl = document.getElementById('chartInfo');
+  const scaleEl = document.getElementById('chartScale');
+  
+  if (chartData.length === 0) {
+    barsContainer.innerHTML = '';
+    infoEl.textContent = 'No data available';
+    return;
+  }
+  
+  // Get max power for scaling
+  const powerValues = chartData.map(d => d.power);
+  const maxPower = Math.max(...powerValues, 10); // At least 10W scale
+  
+  // Update scale labels
+  scaleEl.innerHTML = `
+    <span>${maxPower.toFixed(0)}W</span>
+    <span>${(maxPower * 0.75).toFixed(0)}W</span>
+    <span>${(maxPower * 0.5).toFixed(0)}W</span>
+    <span>${(maxPower * 0.25).toFixed(0)}W</span>
+    <span>0W</span>
+  `;
+  
+  // Create bars - show last 30 points
+  const displayData = chartData.slice(-30);
+  const bars = displayData.map((d, i) => {
+    const heightPercent = (d.power / maxPower) * 100;
+    return `<div class="chart-bar" style="height: ${heightPercent}%" title="${d.time}: ${d.power.toFixed(1)}W"></div>`;
+  }).join('');
+  
+  barsContainer.innerHTML = bars;
+  
+  // Update info
+  const latestPower = chartData[chartData.length - 1].power;
+  const avgPower = (powerValues.reduce((a, b) => a + b, 0) / powerValues.length).toFixed(1);
+  infoEl.textContent = `Current: ${latestPower.toFixed(1)}W • Average: ${avgPower}W • Points: ${chartData.length}`;
+  
+  console.log('Chart updated with', displayData.length, 'bars, max power:', maxPower.toFixed(1) + 'W');
+}
+</script>
+
+</body>
+</html>
