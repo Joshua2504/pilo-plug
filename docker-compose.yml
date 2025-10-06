@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  pilo-plug:
+    build: .
+    container_name: pilo-plug-web
+    ports:
+      - "8080:80"
+    volumes:
+      # Mount the PHP file for development (optional - remove for production)
+      - ./index.php:/var/www/html/index.php:ro
+    networks:
+      - pilo-network
+    restart: unless-stopped
+    environment:
+      - APACHE_RUN_USER=www-data
+      - APACHE_RUN_GROUP=www-data
+
+networks:
+  pilo-network:
+    driver: bridge

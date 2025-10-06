@@ -1,24 +1,19 @@
 <?php
 /**
- * HomeWizard Energy — Single-file PHP interface (v1 + v2)
+ * HomeWizard Energy Socket Controller
  *
- * Drop this file on a PHP-enabled server that can reach your device (same LAN).
- * Default device URL is http://172.16.0.189 for v1 and https://172.16.0.189 for v2.
+ * Simple interface for controlling HomeWizard Energy Socket:
+ * - Turn socket on/off
+ * - Adjust brightness
+ * - Live measurement display with 1-second refresh
  *
- * Covers v1 endpoints: /api, /api/v1/data, /api/v1/state (Energy Socket), /api/v1/telegram, /api/v1/identify, /api/v1/system.
- * Covers v2 endpoints: /api (device info), /api/measurement, /api/system (+ identify/reboot), /api/telegram, /api/batteries,
- * and /api/user (create/list/delete users for token auth).
- *
- * Notes:
- * - v2 uses HTTPS with a device certificate; for quick LAN tests you can disable SSL verification from the UI.
- * - Some endpoints depend on the device type/firmware; errors will show in the response panel.
+ * Default device URL is http://172.16.0.189 for v1 API.
  */
 
-// --- tiny helper: read env/defaults
-$defaultV1 = 'http://172.16.0.189';
-$defaultV2 = 'https://172.16.0.189';
+// Configuration
+$defaultUrl = 'http://172.16.0.189';
 
-// state across requests (super simple)
+// Session management
 session_start();
 
 function value($key, $fallback = '') {
@@ -76,126 +71,91 @@ function http_call($method, $url, $headers = [], $body = null, $insecure = false
     return ['status' => $status_code, 'headers' => $raw_headers, 'body' => $body];
 }
 
-// --- handle form submit
-$action = $_POST['action'] ?? '';
+// Handle requests
+$action = $_POST['action'] ?? $_GET['action'] ?? '';
 
-// remember basics
-$api_version = value('api_version', 'v1'); // v1 or v2
-$device_url = value('device_url', $api_version === 'v2' ? $defaultV2 : $defaultV1);
-$token = value('token', '');
-$insecure = value('insecure', '1') === '1';
+// Settings
+$device_url = value('device_url', $defaultUrl);
 $timeout = (int) (value('timeout', '10'));
 
-keep('api_version', $api_version);
 keep('device_url', $device_url);
-keep('token', $token);
-keep('insecure', $insecure ? '1' : '0');
 keep('timeout', (string)$timeout);
 
-$last_request = '';
-$last_response_headers = '';
-$last_response_body = '';
-$last_status = '';
+$response = null;
+$error = null;
 
 function do_call($method, $path, $body_json = null) {
-    global $api_version, $device_url, $token, $insecure, $timeout, $last_request, $last_response_headers, $last_response_body, $last_status;
+    global $device_url, $timeout, $response, $error;
 
-    // normalize URL (avoid dup slashes)
     $base = rtrim($device_url, '/');
     $url = $base . $path;
 
-    $headers = [];
-    if ($api_version === 'v2') {
-        $headers[] = 'X-Api-Version: 2';
-        if ($token) $headers[] = 'Authorization: Bearer ' . $token;
+    $resp = http_call($method, $url, [], $body_json, false, $timeout);
+    
+    if ($resp['status'] === 0) {
+        $error = json_decode($resp['body'], true);
+        return false;
     }
-
-    $last_request = $method . ' ' . $url . "\n" . ($body_json ? pretty_json($body_json) : '');
-    $resp = http_call($method, $url, $headers, $body_json, $insecure, $timeout);
-    $last_status = (string)$resp['status'];
-    $last_response_headers = $resp['headers'];
-    $last_response_body = $resp['body'];
+    
+    if ($resp['status'] >= 200 && $resp['status'] < 300) {
+        $response = json_decode($resp['body'], true);
+        return true;
+    } else {
+        $error = ['status' => $resp['status'], 'body' => $resp['body']];
+        return false;
+    }
 }
 
-if ($action) {
-    // V1 vs V2 path mapping
+// Handle AJAX requests - return JSON for API calls
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json');
+    
     switch ($action) {
-        // --- common ---
-        case 'device_info':
-            do_call('GET', '/api');
+        case 'get_info':
+            if (do_call('GET', '/api')) {
+                echo json_encode(['success' => true, 'data' => $response]);
+            } else {
+                echo json_encode(['success' => false, 'error' => $error]);
+            }
             break;
+            
+        case 'get_data':
+            if (do_call('GET', '/api/v1/data')) {
+                echo json_encode(['success' => true, 'data' => $response]);
+            } else {
+                echo json_encode(['success' => false, 'error' => $error]);
+            }
+            break;
+            
+        case 'get_state':
+            if (do_call('GET', '/api/v1/state')) {
+                echo json_encode(['success' => true, 'data' => $response]);
+            } else {
+                echo json_encode(['success' => false, 'error' => $error]);
+            }
+            break;
+            
+        default:
+            echo json_encode(['success' => false, 'error' => 'Unknown action']);
+    }
+    exit;
+}
 
-        // --- v1 endpoints ---
-        case 'v1_data':
-            do_call('GET', '/api/v1/data');
-            break;
-        case 'v1_state_get':
-            do_call('GET', '/api/v1/state');
-            break;
-        case 'v1_state_put':
-            $payload = [
-                'power_on' => isset($_POST['power_on']) ? ($_POST['power_on'] === '1') : null,
-                'switch_lock' => isset($_POST['switch_lock']) ? ($_POST['switch_lock'] === '1') : null,
-                'brightness' => isset($_POST['brightness']) && $_POST['brightness'] !== '' ? (int)$_POST['brightness'] : null,
-            ];
-            $payload = array_filter($payload, fn($v) => $v !== null);
+// Handle form submissions
+if ($action) {
+    switch ($action) {
+        case 'toggle_power':
+            $power_on = ($_POST['power_on'] ?? '0') === '1';
+            $payload = ['power_on' => $power_on];
             do_call('PUT', '/api/v1/state', json_encode($payload));
             break;
-        case 'v1_telegram':
-            do_call('GET', '/api/v1/telegram');
-            break;
-        case 'v1_identify':
-            do_call('PUT', '/api/v1/identify');
-            break;
-        case 'v1_system_get':
-            do_call('GET', '/api/v1/system');
-            break;
-        case 'v1_system_put':
-            $payload = [ 'cloud_enabled' => ($_POST['cloud_enabled_v1'] ?? '') === '1' ];
-            do_call('PUT', '/api/v1/system', json_encode($payload));
-            break;
-
-        // --- v2 endpoints ---
-        case 'v2_measurement':
-            do_call('GET', '/api/measurement');
-            break;
-        case 'v2_system_get':
-            do_call('GET', '/api/system');
-            break;
-        case 'v2_system_put':
-            $payload = [];
-            if (isset($_POST['cloud_enabled_v2'])) $payload['cloud_enabled'] = $_POST['cloud_enabled_v2'] === '1';
-            if (isset($_POST['status_led_brightness_pct']) && $_POST['status_led_brightness_pct'] !== '') $payload['status_led_brightness_pct'] = (int)$_POST['status_led_brightness_pct'];
-            if (isset($_POST['api_v1_enabled'])) $payload['api_v1_enabled'] = $_POST['api_v1_enabled'] === '1';
-            do_call('PUT', '/api/system', json_encode($payload));
-            break;
-        case 'v2_identify':
-            do_call('PUT', '/api/system/identify');
-            break;
-        case 'v2_reboot':
-            do_call('PUT', '/api/system/reboot');
-            break;
-        case 'v2_telegram':
-            do_call('GET', '/api/telegram');
-            break;
-        case 'v2_batteries_get':
-            do_call('GET', '/api/batteries');
-            break;
-        case 'v2_batteries_put':
-            $payload = [];
-            if (isset($_POST['battery_mode']) && $_POST['battery_mode'] !== '') $payload['mode'] = $_POST['battery_mode'];
-            do_call('PUT', '/api/batteries', json_encode($payload));
-            break;
-        case 'v2_user_create':
-            $name = trim($_POST['user_name'] ?? 'local/new_user');
-            do_call('POST', '/api/user', json_encode(['name' => $name]));
-            break;
-        case 'v2_user_list':
-            do_call('GET', '/api/user');
-            break;
-        case 'v2_user_delete':
-            $name = trim($_POST['user_name_delete'] ?? '');
-            do_call('DELETE', '/api/user', json_encode(['name' => $name]));
+            
+        case 'set_brightness':
+            $brightness = (int)($_POST['brightness'] ?? 0);
+            if ($brightness >= 0 && $brightness <= 255) {
+                $payload = ['brightness' => $brightness];
+                do_call('PUT', '/api/v1/state', json_encode($payload));
+            }
             break;
     }
 }
@@ -205,269 +165,258 @@ if ($action) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HomeWizard Energy — PHP Interface</title>
+<title>HomeWizard Energy Socket Controller</title>
 <style>
-body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, sans-serif; margin:20px;}
-.grid{display:grid; grid-template-columns: 1fr; gap:16px;}
-.card{border:1px solid #ddd; border-radius:12px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.04);} 
-.row{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
-label{font-weight:600}
-input[type=text], input[type=number]{padding:8px; border-radius:8px; border:1px solid #ccc; min-width:260px}
-select{padding:8px; border-radius:8px; border:1px solid #ccc}
-button{padding:8px 12px; border-radius:8px; border:1px solid #999; background:#f7f7f7; cursor:pointer}
-button.primary{background:#0ea5e9; color:#fff; border-color:#0ea5e9}
-pre{background:#0b1020; color:#e6f1ff; padding:12px; border-radius:8px; overflow:auto; max-height:400px}
-small, .muted{color:#666}
-hr{border:none; border-top:1px dashed #ddd; margin:12px 0}
-.badge{font-size:12px; padding:2px 8px; border-radius:999px; background:#eef; border:1px solid #99c}
+body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, sans-serif; margin:20px; background:#f8f9fa;}
+.container{max-width: 800px; margin: 0 auto;}
+.card{background: white; border:1px solid #e9ecef; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,.1);}
+.row{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px;}
+.col{flex:1; min-width:200px;}
+label{font-weight:600; margin-bottom:8px; display:block;}
+input[type=text], input[type=number], input[type=range]{padding:10px; border-radius:8px; border:1px solid #ced4da; width:100%;}
+button{padding:12px 24px; border-radius:8px; border:none; cursor:pointer; font-weight:600; transition:all 0.2s;}
+button.primary{background:#28a745; color:white;}
+button.primary:hover{background:#218838;}
+button.danger{background:#dc3545; color:white;}
+button.danger:hover{background:#c82333;}
+.status{padding:12px; border-radius:8px; margin-bottom:16px; font-weight:600;}
+.status.online{background:#d4edda; color:#155724; border:1px solid #c3e6cb;}
+.status.offline{background:#f8d7da; color:#721c24; border:1px solid #f5c6cb;}
+.measurement{display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px;}
+.metric{text-align:center; padding:16px; background:#f8f9fa; border-radius:8px;}
+.metric-value{font-size:24px; font-weight:bold; color:#495057;}
+.metric-label{font-size:14px; color:#6c757d; margin-top:4px;}
+.controls{display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;}
+#brightnessValue{font-weight:bold; color:#495057;}
 </style>
 </head>
 <body>
-<h1>HomeWizard Energy — Single-file PHP UI</h1>
-<form method="post" class="card">
-  <div class="row">
-    <label>API Version</label>
-    <select name="api_version" onchange="this.form.submit()">
-      <option value="v1" <?= $api_version==='v1'?'selected':''?>>v1 (no auth)</option>
-      <option value="v2" <?= $api_version==='v2'?'selected':''?>>v2 (Bearer token)</option>
-    </select>
-    <label>Device URL</label>
-    <input type="text" name="device_url" value="<?= htmlspecialchars($device_url) ?>" placeholder="http(s)://IP">
-    <label>Timeout</label>
-    <input type="number" name="timeout" value="<?= (int)$timeout ?>" min="1" max="60" style="width:80px">
-    <label class="row"><input type="checkbox" name="insecure" value="1" <?= $insecure?'checked':''?>> Disable SSL verification (LAN/dev)</label>
-  </div>
-  <?php if ($api_version==='v2'): ?>
-  <div class="row" style="margin-top:8px">
-    <label>Bearer token</label>
-    <input type="text" name="token" value="<?= htmlspecialchars($token) ?>" placeholder="32 hex chars">
-    <span class="muted">You can create a token below via <code>/api/user</code> (press device button).</span>
-  </div>
-  <?php endif; ?>
-  <div style="margin-top:12px">
-    <button class="primary">Save</button>
-  </div>
-</form>
+<div class="container">
+<h1>HomeWizard Energy Socket Controller</h1>
 
-<div class="grid">
-  <div class="card">
-    <h2>Device Information <span class="badge">GET /api</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="<?= $api_version ?>">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
-      <input type="hidden" name="insecure" value="<?= $insecure?'1':'0' ?>">
-      <input type="hidden" name="timeout" value="<?= (int)$timeout ?>">
-      <button name="action" value="device_info">Fetch</button>
-    </form>
-  </div>
-
-  <?php if ($api_version==='v1'): ?>
-  <div class="card">
-    <h2>v1 — Measurement <span class="badge">GET /api/v1/data</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="v1">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <button name="action" value="v1_data">Fetch</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v1 — Energy Socket State <span class="badge">GET/PUT /api/v1/state</span></h2>
-    <form method="post">
-      <input type="hidden" name="api_version" value="v1">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <div class="row"><button name="action" value="v1_state_get">Get</button></div>
-      <hr>
-      <div class="row">
-        <label><input type="checkbox" name="power_on" value="1"> power_on</label>
-        <label><input type="checkbox" name="switch_lock" value="1"> switch_lock</label>
-        <label>brightness <input type="number" name="brightness" min="0" max="255" style="width:100px"></label>
-        <button name="action" value="v1_state_put">PUT</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v1 — Telegram <span class="badge">GET /api/v1/telegram</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="v1">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <button name="action" value="v1_telegram">Fetch</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v1 — Identify <span class="badge">PUT /api/v1/identify</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="v1">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <button name="action" value="v1_identify">Blink LED</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v1 — System <span class="badge">GET/PUT /api/v1/system</span></h2>
-    <form method="post">
-      <input type="hidden" name="api_version" value="v1">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <div class="row"><button name="action" value="v1_system_get">Get</button></div>
-      <hr>
-      <div class="row">
-        <label><input type="checkbox" name="cloud_enabled_v1" value="1"> cloud_enabled</label>
-        <button name="action" value="v1_system_put">PUT</button>
-      </div>
-    </form>
-  </div>
-  <?php endif; ?>
-
-  <?php if ($api_version==='v2'): ?>
-  <div class="card">
-    <h2>v2 — Measurement <span class="badge">GET /api/measurement</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="v2">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
-      <input type="hidden" name="insecure" value="<?= $insecure?'1':'0' ?>">
-      <input type="hidden" name="timeout" value="<?= (int)$timeout ?>">
-      <button name="action" value="v2_measurement">Fetch</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v2 — System <span class="badge">GET/PUT /api/system</span></h2>
-    <form method="post">
-      <input type="hidden" name="api_version" value="v2">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
-      <div class="row"><button name="action" value="v2_system_get">Get</button></div>
-      <hr>
-      <div class="row">
-        <label><input type="checkbox" name="cloud_enabled_v2" value="1"> cloud_enabled</label>
-        <label>status_led_brightness_pct <input type="number" name="status_led_brightness_pct" min="0" max="100" style="width:100px"></label>
-        <label><input type="checkbox" name="api_v1_enabled" value="1"> api_v1_enabled</label>
-        <button name="action" value="v2_system_put">PUT</button>
-      </div>
-      <hr>
-      <div class="row">
-        <button name="action" value="v2_identify">Identify (blink)</button>
-        <button name="action" value="v2_reboot" onclick="return confirm('Reboot device now?')">Reboot</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v2 — Telegram <span class="badge">GET /api/telegram</span></h2>
-    <form method="post" class="row">
-      <input type="hidden" name="api_version" value="v2">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
-      <button name="action" value="v2_telegram">Fetch</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v2 — Batteries <span class="badge">GET/PUT /api/batteries</span></h2>
-    <form method="post">
-      <input type="hidden" name="api_version" value="v2">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
-      <div class="row"><button name="action" value="v2_batteries_get">Get</button></div>
-      <hr>
-      <div class="row">
-        <label>mode
-          <select name="battery_mode">
-            <option value="">—</option>
-            <option value="off">off</option>
-            <option value="charge">charge</option>
-            <option value="discharge">discharge</option>
-            <option value="auto">auto</option>
-          </select>
-        </label>
-        <button name="action" value="v2_batteries_put">PUT</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>v2 — Users & Token <span class="badge">/api/user</span></h2>
-    <form method="post">
-      <input type="hidden" name="api_version" value="v2">
-      <input type="hidden" name="device_url" value="<?= htmlspecialchars($device_url) ?>">
-      <input type="hidden" name="insecure" value="<?= $insecure?'1':'0' ?>">
-      <div class="row">
-        <label>Create user name</label>
-        <input type="text" name="user_name" placeholder="local/my-app">
-        <button name="action" value="v2_user_create">POST (press device button)</button>
-      </div>
-      <hr>
-      <div class="row">
-        <button name="action" value="v2_user_list">GET list users</button>
-      </div>
-      <hr>
-      <div class="row">
-        <label>Delete user name</label>
-        <input type="text" name="user_name_delete" placeholder="local/my-app or cloud/cloud_user">
-        <button name="action" value="v2_user_delete" onclick="return confirm('Delete user? You may lose access.')">DELETE</button>
-      </div>
-    </form>
-    <p class="muted">Tip: After you successfully POST and receive a token, paste it in the header field at the top and click Save.</p>
-  </div>
-
-  <div class="card">
-    <h2>v2 — Live WebSocket (experimental)</h2>
-    <p class="muted">Opens <code>wss://&lt;ip&gt;/api/ws</code> and subscribes to <code>measurement</code>. Requires a valid token and a browser that accepts the device certificate.</p>
+<!-- Settings -->
+<div class="card">
+  <h2>Settings</h2>
+  <form method="post">
     <div class="row">
-      <button type="button" onclick="startWs()">Connect</button>
-      <button type="button" onclick="stopWs()">Close</button>
+      <div class="col">
+        <label>Device URL</label>
+        <input type="text" name="device_url" value="<?= htmlspecialchars($device_url) ?>" placeholder="http://192.168.1.100">
+      </div>
+      <div class="col">
+        <label>Timeout (seconds)</label>
+        <input type="number" name="timeout" value="<?= (int)$timeout ?>" min="1" max="60">
+      </div>
+      <div class="col" style="display:flex; align-items:end;">
+        <button type="submit" class="primary">Save Settings</button>
+      </div>
     </div>
-    <pre id="wslog"></pre>
-  </div>
-  <?php endif; ?>
+  </form>
+</div>
 
-  <div class="card">
-    <h2>Last Request / Response</h2>
-    <div class="row"><span class="badge">HTTP <?= htmlspecialchars($last_status) ?></span></div>
-    <h3>Request</h3>
-    <pre><?= htmlspecialchars($last_request) ?></pre>
-    <h3>Response Headers</h3>
-    <pre><?= htmlspecialchars($last_response_headers) ?></pre>
-    <h3>Response Body</h3>
-    <pre><?= htmlspecialchars(pretty_json($last_response_body)) ?></pre>
+<!-- Status -->
+<div id="connectionStatus" class="status offline">
+  <span id="statusText">Checking connection...</span>
+</div>
+
+<!-- Live Measurements -->
+<div class="card">
+  <h2>Live Measurements</h2>
+  <div class="measurement">
+    <div class="metric">
+      <div id="powerActive" class="metric-value">--</div>
+      <div class="metric-label">Active Power (W)</div>
+    </div>
+    <div class="metric">
+      <div id="powerReactive" class="metric-value">--</div>
+      <div class="metric-label">Reactive Power (VAR)</div>
+    </div>
+    <div class="metric">
+      <div id="voltage" class="metric-value">--</div>
+      <div class="metric-label">Voltage (V)</div>
+    </div>
+    <div class="metric">
+      <div id="current" class="metric-value">--</div>
+      <div class="metric-label">Current (A)</div>
+    </div>
+    <div class="metric">
+      <div id="frequency" class="metric-value">--</div>
+      <div class="metric-label">Frequency (Hz)</div>
+    </div>
+    <div class="metric">
+      <div id="energyTotal" class="metric-value">--</div>
+      <div class="metric-label">Total Energy (kWh)</div>
+    </div>
   </div>
 </div>
 
-<?php if ($api_version==='v2'): ?>
-<script>
-const deviceUrl = "<?= htmlspecialchars($device_url) ?>";
-const token = "<?= htmlspecialchars($token) ?>";
-let ws;
-function log(line){ const el=document.getElementById('wslog'); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight; }
-function startWs(){
-  try{
-    const wssUrl = deviceUrl.replace(/^http:/,'ws:').replace(/^https:/,'wss:').replace(/\/$/, '') + '/api/ws';
-    ws = new WebSocket(wssUrl);
-    ws.onopen = () => log('WS: opened ' + wssUrl);
-    ws.onmessage = ev => {
-      // auto respond with authorization when requested
-      try{
-        const msg = JSON.parse(ev.data);
-        if (msg && msg.type === 'authorization_requested'){
-          ws.send(JSON.stringify({type:'authorization', data: token}));
-          log('WS→ authorization token sent');
-          // subscribe to measurement by default
-          setTimeout(()=> ws.send(JSON.stringify({type:'subscribe', data:'measurement'})), 50);
-        }
-      }catch(e){}
-      log('WS← ' + ev.data);
-    };
-    ws.onerror = (e) => log('WS error: ' + (e.message||'unknown'));
-    ws.onclose = () => log('WS: closed');
-  }catch(err){ log('WS init error: ' + err.message); }
-}
-function stopWs(){ if(ws){ ws.close(); } }
-</script>
-<?php endif; ?>
+<!-- Socket Controls -->
+<div class="card">
+  <h2>Socket Controls</h2>
+  <div class="controls">
+    <div>
+      <label>Power Control</label>
+      <div style="display:flex; gap:12px; margin-top:8px;">
+        <button type="button" onclick="togglePower(true)" class="primary" id="btnPowerOn">Turn ON</button>
+        <button type="button" onclick="togglePower(false)" class="danger" id="btnPowerOff">Turn OFF</button>
+      </div>
+      <div style="margin-top:12px;">
+        <strong>Status: <span id="powerStatus">Unknown</span></strong>
+      </div>
+    </div>
+    <div>
+      <label>Brightness Control</label>
+      <div style="margin-top:8px;">
+        <input type="range" id="brightnessSlider" min="0" max="255" value="0" oninput="updateBrightnessDisplay(this.value)">
+        <div style="margin-top:8px;">
+          Value: <span id="brightnessValue">0</span> / 255
+        </div>
+        <button type="button" onclick="setBrightness()" class="primary" style="margin-top:8px;">Set Brightness</button>
+      </div>
+    </div>
+  </div>
+</div>
 
+<!-- Device Information -->
+<div class="card">
+  <h2>Device Information</h2>
+  <div id="deviceInfo">
+    <div>Loading device information...</div>
+  </div>
+</div>
+
+<script>
+let refreshInterval;
+let currentState = {};
+
+// Start live updates when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    startLiveUpdates();
+});
+
+function startLiveUpdates() {
+    // Initial load
+    updateDeviceInfo();
+    updateMeasurements();
+    updateSocketState();
+    
+    // Set up 1-second refresh
+    refreshInterval = setInterval(function() {
+        updateMeasurements();
+        updateSocketState();
+    }, 1000);
+    
+    // Update device info less frequently (every 30 seconds)
+    setInterval(updateDeviceInfo, 30000);
+}
+
+function updateDeviceInfo() {
+    fetch('?ajax=1&action=get_info')
+        .then(response => response.json())
+        .then(data => {
+            const statusEl = document.getElementById('connectionStatus');
+            const statusTextEl = document.getElementById('statusText');
+            const deviceInfoEl = document.getElementById('deviceInfo');
+            
+            if (data.success) {
+                statusEl.className = 'status online';
+                statusTextEl.textContent = 'Connected to ' + (data.data.product_name || 'HomeWizard Device');
+                
+                let infoHtml = '<div class="row">';
+                if (data.data.product_name) infoHtml += '<div class="col"><strong>Product:</strong> ' + data.data.product_name + '</div>';
+                if (data.data.serial) infoHtml += '<div class="col"><strong>Serial:</strong> ' + data.data.serial + '</div>';
+                if (data.data.firmware_version) infoHtml += '<div class="col"><strong>Firmware:</strong> ' + data.data.firmware_version + '</div>';
+                infoHtml += '</div>';
+                
+                deviceInfoEl.innerHTML = infoHtml;
+            } else {
+                statusEl.className = 'status offline';
+                statusTextEl.textContent = 'Connection failed';
+                deviceInfoEl.innerHTML = '<div style="color: #dc3545;">Unable to connect to device</div>';
+            }
+        })
+        .catch(error => {
+            document.getElementById('connectionStatus').className = 'status offline';
+            document.getElementById('statusText').textContent = 'Connection error';
+        });
+}
+
+function updateMeasurements() {
+    fetch('?ajax=1&action=get_data')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                const d = data.data;
+                document.getElementById('powerActive').textContent = d.active_power_w !== undefined ? d.active_power_w.toFixed(1) : '--';
+                document.getElementById('powerReactive').textContent = d.reactive_power_var !== undefined ? d.reactive_power_var.toFixed(1) : '--';
+                document.getElementById('voltage').textContent = d.voltage_v !== undefined ? d.voltage_v.toFixed(1) : '--';
+                document.getElementById('current').textContent = d.current_a !== undefined ? d.current_a.toFixed(3) : '--';
+                document.getElementById('frequency').textContent = d.frequency_hz !== undefined ? d.frequency_hz.toFixed(2) : '--';
+                document.getElementById('energyTotal').textContent = d.total_energy_import_kwh !== undefined ? d.total_energy_import_kwh.toFixed(3) : '--';
+            }
+        })
+        .catch(error => console.log('Measurement update failed:', error));
+}
+
+function updateSocketState() {
+    fetch('?ajax=1&action=get_state')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                const d = data.data;
+                currentState = d;
+                
+                // Update power status
+                const powerStatus = document.getElementById('powerStatus');
+                if (d.power_on !== undefined) {
+                    powerStatus.textContent = d.power_on ? 'ON' : 'OFF';
+                    powerStatus.style.color = d.power_on ? '#28a745' : '#dc3545';
+                }
+                
+                // Update brightness slider
+                if (d.brightness !== undefined) {
+                    document.getElementById('brightnessSlider').value = d.brightness;
+                    document.getElementById('brightnessValue').textContent = d.brightness;
+                }
+            }
+        })
+        .catch(error => console.log('State update failed:', error));
+}
+
+function togglePower(turnOn) {
+    const formData = new FormData();
+    formData.append('action', 'toggle_power');
+    formData.append('power_on', turnOn ? '1' : '0');
+    
+    fetch('', {
+        method: 'POST',
+        body: formData
+    }).then(() => {
+        // Force immediate state update
+        setTimeout(updateSocketState, 100);
+    });
+}
+
+function setBrightness() {
+    const brightness = document.getElementById('brightnessSlider').value;
+    const formData = new FormData();
+    formData.append('action', 'set_brightness');
+    formData.append('brightness', brightness);
+    
+    fetch('', {
+        method: 'POST',
+        body: formData
+    }).then(() => {
+        // Force immediate state update
+        setTimeout(updateSocketState, 100);
+    });
+}
+
+function updateBrightnessDisplay(value) {
+    document.getElementById('brightnessValue').textContent = value;
+}
+</script>
+
+</div>
 </body>
 </html>
