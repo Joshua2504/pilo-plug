@@ -333,10 +333,22 @@ button.danger:hover{background:#c82333;}
 <script>
 let refreshInterval;
 let currentState = {};
+let userInteractingWithSlider = false;
 
 // Start live updates when page loads
 document.addEventListener('DOMContentLoaded', function() {
     startLiveUpdates();
+    
+    // Track when user is interacting with brightness slider
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    brightnessSlider.addEventListener('mousedown', () => { userInteractingWithSlider = true; });
+    brightnessSlider.addEventListener('mouseup', () => { 
+        setTimeout(() => { userInteractingWithSlider = false; }, 500); // Delay to allow for final adjustment
+    });
+    brightnessSlider.addEventListener('touchstart', () => { userInteractingWithSlider = true; });
+    brightnessSlider.addEventListener('touchend', () => { 
+        setTimeout(() => { userInteractingWithSlider = false; }, 500); // Delay to allow for final adjustment
+    });
 });
 
 function startLiveUpdates() {
@@ -443,12 +455,16 @@ function updateSocketState() {
                     powerStatus.style.color = '#6c757d';
                 }
                 
-                // Update brightness slider (only if supported)
+                // Update brightness slider (only if supported and user isn't interacting with it)
                 const brightnessControl = document.querySelector('.controls > div:nth-child(2)');
                 if (d.brightness !== undefined) {
                     brightnessControl.style.display = 'block';
-                    document.getElementById('brightnessSlider').value = d.brightness;
-                    document.getElementById('brightnessValue').textContent = d.brightness;
+                    
+                    // Only update slider if user isn't currently interacting with it
+                    if (!userInteractingWithSlider) {
+                        document.getElementById('brightnessSlider').value = d.brightness;
+                        document.getElementById('brightnessValue').textContent = d.brightness;
+                    }
                 } else {
                     // Hide brightness control if not supported
                     brightnessControl.style.display = 'none';
@@ -511,12 +527,21 @@ function setBrightness() {
     formData.append('action', 'set_brightness');
     formData.append('brightness', brightness);
     
+    // Temporarily prevent slider updates while setting brightness
+    userInteractingWithSlider = true;
+    
     fetch('', {
         method: 'POST',
         body: formData
     }).then(() => {
-        // Force immediate state update
-        setTimeout(updateSocketState, 100);
+        // Allow updates again after a short delay
+        setTimeout(() => {
+            userInteractingWithSlider = false;
+            updateSocketState();
+        }, 1000);
+    }).catch(() => {
+        // Re-enable updates on error
+        userInteractingWithSlider = false;
     });
 }
 
