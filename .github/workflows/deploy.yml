@@ -25,7 +25,7 @@ jobs:
         
     - name: Deploy to server
       run: |
-        ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
+        ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ vars.SSH_HOST }} <<EOF
           # Create project directory if it doesn't exist
           mkdir -p ${{ vars.SSH_DIR }}
           
@@ -43,29 +43,27 @@ jobs:
           git reset --hard origin/main
           
           # Create production .env file from GitHub environment variables
-          cat > .env << 'ENVEOF'
-          # Server Configuration
-          PORT=${{ vars.PORT || '3000' }}
-          NODE_ENV=production
-          
-          # Database Configuration
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_PORT=${{ secrets.DB_PORT || '3306' }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          
-          # HomeWizard Device Configuration  
-          DEVICE_URL=${{ vars.DEVICE_URL }}
-          DEVICE_TIMEOUT=${{ vars.DEVICE_TIMEOUT || '10000' }}
-          
-          # Data Collection Configuration
-          COLLECTION_INTERVAL=${{ vars.COLLECTION_INTERVAL || '60000' }}
-          STATS_RETENTION_DAYS=${{ vars.STATS_RETENTION_DAYS || '90' }}
-          
-          # Logging
-          LOG_LEVEL=${{ vars.LOG_LEVEL || 'info' }}
-          ENVEOF
+          echo "# Server Configuration" > .env
+          echo "PORT=${{ vars.PORT || '3000' }}" >> .env
+          echo "NODE_ENV=production" >> .env
+          echo "" >> .env
+          echo "# Database Configuration" >> .env
+          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
+          echo "DB_PORT=${{ secrets.DB_PORT || '3306' }}" >> .env
+          echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+          echo "" >> .env
+          echo "# HomeWizard Device Configuration" >> .env
+          echo "DEVICE_URL=${{ vars.DEVICE_URL }}" >> .env
+          echo "DEVICE_TIMEOUT=${{ vars.DEVICE_TIMEOUT || '10000' }}" >> .env
+          echo "" >> .env
+          echo "# Data Collection Configuration" >> .env
+          echo "COLLECTION_INTERVAL=${{ vars.COLLECTION_INTERVAL || '60000' }}" >> .env
+          echo "STATS_RETENTION_DAYS=${{ vars.STATS_RETENTION_DAYS || '90' }}" >> .env
+          echo "" >> .env
+          echo "# Logging" >> .env
+          echo "LOG_LEVEL=${{ vars.LOG_LEVEL || 'info' }}" >> .env
           
           # Stop existing containers
           docker compose down || true
