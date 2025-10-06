@@ -117,9 +117,8 @@ Add the following variables:
 #### Prerequisites
 
 1. **Docker and Docker Compose** must be installed on the server
-2. **Git** must be installed on the server
+2. **Git** must be installed on the server  
 3. **SSH access** configured with key-based authentication
-4. The repository must be cloned to the server at the path specified in `SSH_DIR`
 
 #### Initial Server Setup
 
@@ -134,17 +133,14 @@ sudo sh get-docker.sh
 # (Usually included with modern Docker installations)
 docker compose version
 
-# Clone the repository
-cd /opt  # or your preferred location
-git clone https://github.com/yourusername/pilo-plug.git
-cd pilo-plug
-
 # Set up SSH key authentication
 mkdir -p ~/.ssh
 # Add your GitHub Actions public key to ~/.ssh/authorized_keys
 echo "your-public-key-here" >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 ```
+
+**Note:** The GitHub Actions workflow will automatically create the project directory and clone the repository on first deployment. You just need to ensure Docker, Git, and SSH access are configured.
 
 ### How Deployment Works
 
@@ -154,11 +150,12 @@ The GitHub Actions workflow triggers on:
 
 The deployment process:
 1. Connects to your server via SSH
-2. Pulls the latest code from the repository
-3. Stops existing Docker containers
-4. Builds and starts new containers with `docker compose up -d --build`
-5. Cleans up unused Docker images
-6. Verifies the deployment was successful
+2. Creates the project directory if it doesn't exist
+3. Initializes Git repository if needed and pulls the latest code
+4. Stops existing Docker containers (if any)
+5. Builds and starts new containers with `docker compose up -d --build`
+6. Cleans up unused Docker images
+7. Verifies the deployment was successful
 
 ### Manual Deployment
 

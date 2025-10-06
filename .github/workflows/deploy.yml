@@ -26,14 +26,24 @@ jobs:
     - name: Deploy to server
       run: |
         ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
+          # Create project directory if it doesn't exist
+          mkdir -p ${{ vars.SSH_DIR }}
+          
           # Navigate to project directory
           cd ${{ vars.SSH_DIR }}
           
+          # Initialize git repository if it doesn't exist
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin ${{ github.server_url }}/${{ github.repository }}.git
+          fi
+          
           # Pull latest changes
-          git pull origin main
+          git fetch origin main
+          git reset --hard origin/main
           
           # Stop existing containers
-          docker compose down
+          docker compose down || true
           
           # Build and start containers
           docker compose up -d --build
@@ -48,13 +58,17 @@ jobs:
         sleep 10
         
         # Check if the service is responding
-        ssh -p ${{ vars.SSH_PORT }} ${{ vars.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
-          if docker compose ps | grep -q "Up"; then
+        ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
+          cd ${{ vars.SSH_DIR }}
+          
+          # Check container status
+          if docker compose ps --format table | grep -q "Up\|running"; then
             echo "✅ Deployment successful - containers are running"
             docker compose ps
           else
             echo "❌ Deployment failed - containers not running"
             docker compose ps
+            echo "--- Container logs ---"
             docker compose logs
             exit 1
           fi
