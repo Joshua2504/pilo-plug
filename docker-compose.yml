@@ -1,3 +1,6 @@
+# Docker Compose file for Pilo Plug - HomeWizard Energy Socket Controller
+# Use: docker compose up -d (modern syntax)
+# Legacy: docker-compose up -d (deprecated)
 version: '3.8'
 
 services:

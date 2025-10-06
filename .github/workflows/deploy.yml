@@ -1,0 +1,61 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup SSH key
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: Add server to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -p ${{ vars.SSH_PORT }} ${{ vars.SSH_HOST }} >> ~/.ssh/known_hosts
+        
+    - name: Deploy to server
+      run: |
+        ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
+          # Navigate to project directory
+          cd ${{ vars.SSH_DIR }}
+          
+          # Pull latest changes
+          git pull origin main
+          
+          # Stop existing containers
+          docker compose down
+          
+          # Build and start containers
+          docker compose up -d --build
+          
+          # Clean up unused Docker images
+          docker image prune -f
+        EOF
+        
+    - name: Verify deployment
+      run: |
+        # Wait a moment for containers to start
+        sleep 10
+        
+        # Check if the service is responding
+        ssh -p ${{ vars.SSH_PORT }} ${{ vars.SSH_USER }}@${{ vars.SSH_HOST }} << 'EOF'
+          if docker compose ps | grep -q "Up"; then
+            echo "✅ Deployment successful - containers are running"
+            docker compose ps
+          else
+            echo "❌ Deployment failed - containers not running"
+            docker compose ps
+            docker compose logs
+            exit 1
+          fi
+        EOF
