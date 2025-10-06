@@ -24,6 +24,14 @@ class DataCollectionService {
       return;
     }
 
+    // Skip data collection in development environment
+    if (config.server.environment === 'development') {
+      console.log('🚫 Skipping data collection - NODE_ENV is set to development');
+      console.log('   Device control and monitoring APIs remain available');
+      this.isRunning = false; // Keep service marked as not running
+      return;
+    }
+
     console.log(`🚀 Starting data collection service (interval: ${config.collection.interval}ms)`);
     
     // Start periodic data collection
@@ -167,6 +175,10 @@ class DataCollectionService {
 
   // Manual trigger for data collection (useful for testing/debugging)
   async triggerCollection() {
+    if (config.server.environment === 'development') {
+      console.log('🚫 Manual data collection skipped - NODE_ENV is set to development');
+      return;
+    }
     console.log('🔄 Manual data collection triggered');
     await this.collectData();
   }
@@ -177,7 +189,7 @@ class DataCollectionService {
       ? (this.stats.collectionsSuccessful / this.stats.collectionsAttempted * 100).toFixed(2)
       : 0;
 
-    return {
+    const baseStats = {
       isRunning: this.isRunning,
       interval: config.collection.interval,
       retentionDays: config.collection.retentionDays,
@@ -190,12 +202,34 @@ class DataCollectionService {
         ? new Date(this.stats.lastCollection.getTime() + config.collection.interval)
         : null
     };
+
+    // Add development mode note if applicable
+    if (config.server.environment === 'development') {
+      baseStats.environment = 'development';
+      baseStats.note = 'Data collection disabled in development environment';
+    }
+
+    return baseStats;
   }
 
   // Health check for the service
   async healthCheck() {
     const deviceHealth = await this.homeWizardAPI.healthCheck();
     const stats = this.getStats();
+    
+    // In development mode, service is considered healthy if device is accessible
+    if (config.server.environment === 'development') {
+      return {
+        status: deviceHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
+        timestamp: new Date(),
+        service: {
+          isRunning: false,
+          stats: stats,
+          note: 'Data collection disabled in development environment'
+        },
+        device: deviceHealth
+      };
+    }
     
     // Service is healthy if:
     // 1. It's running
